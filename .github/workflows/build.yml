@@ -1,0 +1,78 @@
+# This file is part of BOINC.
+# https://boinc.berkeley.edu
+# Copyright (C) 2025 University of California
+#
+# BOINC is free software; you can redistribute it and/or modify it
+# under the terms of the GNU Lesser General Public License
+# as published by the Free Software Foundation,
+# either version 3 of the License, or (at your option) any later version.
+#
+# BOINC is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+# See the GNU Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with BOINC.  If not, see <http://www.gnu.org/licenses/>.
+
+name: build
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  schedule:
+    - cron:  '0 0 * * *'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+    linux:
+      name: Linux
+      runs-on: ubuntu-latest
+      container:
+        image: debian:bullseye
+      strategy:
+        matrix:
+          arch: [ 'arm64', 'x64' ]
+        fail-fast: false
+      steps:
+        - name: Checkout
+          uses: actions/checkout@v5
+
+        - name: Install dependencies
+          run: |
+            apt-get -qq update
+            apt-get install -y make build-essential m4 pkg-config autoconf libtool git curl zip unzip tar cmake
+
+        - name: Install arm64 dependencies
+          if: ${{ matrix.arch == 'arm64' }}
+          run: |
+            apt-get install -y g++-aarch64-linux-gnu gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+
+        - name: Prepare build
+          run: |
+            mkdir -p build
+
+        - name: Configure arm64 build
+          if: ${{ matrix.arch == 'arm64' }}
+          run: |
+            cmake -E env CC="aarch64-linux-gnu-gcc" CXX="aarch64-linux-gnu-g++" LD="aarch64-linux-gnu-ld" CFLAGS="-march=armv8-a" CXXFLAGS="-march=armv8-a" LDFLAGS="-march=armv8-a" cmake -B build -S .
+
+        - name: Configure x64 build
+          if: ${{ matrix.arch == 'x64' }}
+          run: |
+            cmake -E env CC="gcc -m64" CXX="g++ -m64" CFLAGS="-m64" CXXFLAGS="-m64" LDFLAGS="-m64" cmake -B build -S .
+
+        - name: Build
+          run: |
+            cmake --build build --config Release
+
+        - name: Upload artifacts
+          if: ${{ success() }}
+          uses: actions/upload-artifact@v4
+          with:
+            name: boinc-buda-app-${{ matrix.arch }}
+            path: build/boinc-buda-app
